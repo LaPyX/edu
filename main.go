@@ -4,6 +4,9 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/joho/godotenv"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -20,8 +23,124 @@ const (
 	QUARTER_4
 )
 
+const (
+	ButtonMarks    = "marks"
+	ButtonSchedule = "schedule"
+
+	ButtonMarkDay     = "mark_day"
+	ButtonMarkWeek    = "mark_week"
+	ButtonMarkQuarter = "mark_quarter"
+	ButtonMarkSubject = "mark_subject"
+
+	ButtonScheduleToday    = "schedule_today"
+	ButtonScheduleTomorrow = "schedule_tomorrow"
+	ButtonScheduleWeek     = "schedule_week"
+	ButtonScheduleDate     = "schedule_date"
+)
+
+var commandsKeyboard = tgbotapi.NewInlineKeyboardMarkup(
+	tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("Оценки", ButtonMarks),
+	),
+	tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("Расписание", ButtonSchedule),
+	),
+)
+
+var markKeyboard = tgbotapi.NewInlineKeyboardMarkup(
+	tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("Оценки за день", ButtonMarkDay),
+	),
+	tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("Оценки за неделю", ButtonMarkWeek),
+	),
+	tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("Оценки за четверть", ButtonMarkQuarter),
+	),
+	tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("Оценки по предмету", ButtonMarkSubject),
+	),
+)
+
+var scheduleKeyboard = tgbotapi.NewInlineKeyboardMarkup(
+	tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("Расписание на сегодня", ButtonScheduleToday),
+	),
+	tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("Расписание на завтра", ButtonScheduleTomorrow),
+	),
+	tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("Расписание за неделю", ButtonScheduleWeek),
+	),
+	tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("Расписание за дату", ButtonScheduleDate),
+	),
+)
+
 func main() {
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+
 	var edu = newEdu()
+
+	bot, err := tgbotapi.NewBotAPI(os.Getenv("TELEGRAM_APITOKEN"))
+	if err != nil {
+		log.Panic(err)
+	}
+
+	bot.Debug = true
+
+	log.Printf("Authorized on account %s", bot.Self.UserName)
+
+	u := tgbotapi.NewUpdate(0)
+	u.Timeout = 60
+
+	updates := bot.GetUpdatesChan(u)
+
+	for update := range updates {
+		m, _ := json.Marshal(update)
+		log.Println("Message:" + string(m))
+
+		if update.Message != nil {
+			// Construct a new message from the given chat ID and containing
+			// the text that we received.
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Выберите действие:")
+
+			if update.Message.IsCommand() {
+				// Extract the command from the Message.
+				switch update.Message.Command() {
+				case "start":
+					msg.ReplyMarkup = commandsKeyboard
+				case "close":
+					msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
+				case "help":
+					msg.Text = "I understand /sayhi and /status."
+				default:
+					msg.Text = "I don't know that command"
+				}
+			}
+
+			// Send the message.
+			if _, err = bot.Send(msg); err != nil {
+				panic(err)
+			}
+		} else if update.CallbackQuery != nil {
+			msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Выберите действие:")
+
+			switch update.CallbackQuery.Data {
+			case ButtonMarks:
+				msg.ReplyMarkup = markKeyboard
+			case ButtonSchedule:
+				msg.ReplyMarkup = scheduleKeyboard
+			}
+
+			if _, err := bot.Send(msg); err != nil {
+				panic(err)
+			}
+		}
+	}
 
 	ReaderCommandStart(edu)
 
