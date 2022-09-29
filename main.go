@@ -100,8 +100,8 @@ func main() {
 	updates := bot.GetUpdatesChan(u)
 
 	for update := range updates {
-		m, _ := json.Marshal(update)
-		log.Println("Message:" + string(m))
+		//m, _ := json.Marshal(update)
+		//log.Println("Message:" + string(m))
 
 		if update.Message != nil {
 			// Construct a new message from the given chat ID and containing
@@ -134,6 +134,54 @@ func main() {
 				msg.ReplyMarkup = markKeyboard
 			case ButtonSchedule:
 				msg.ReplyMarkup = scheduleKeyboard
+			case ButtonMarkDay:
+				ret := edu.getEduByDay(&EduFilter{
+					ChildName: "Попов Кирилл Олегович",
+				})
+
+				msg.Text = "Оценки за день: \n\n"
+				var msgText []string
+				for _, v := range ret {
+					if v.Marks == nil {
+						continue
+					}
+
+					var marks []string
+					for _, m := range v.Marks {
+						marks = append(marks, m.Value+"("+m.Reason+")")
+					}
+					msgText = append(msgText, v.Subject+": "+strings.Join(marks, ", "))
+				}
+
+				if msgText != nil {
+					msg.Text += strings.Join(msgText, "\n")
+				} else {
+					msg.Text = "Оценок нет :("
+				}
+			case ButtonMarkWeek:
+				ret := edu.getEduByWeek(&EduFilter{
+					ChildName: "Попов Кирилл Олегович",
+				})
+
+				msg.Text = "Оценки за неделю: \n\n"
+				var msgText []string
+				for _, v := range ret {
+					if v.Marks == nil {
+						continue
+					}
+
+					var marks []string
+					for _, m := range v.Marks {
+						marks = append(marks, m.Value)
+					}
+					msgText = append(msgText, v.Subject+": "+strings.Join(marks, ", "))
+				}
+
+				if msgText != nil {
+					msg.Text += strings.Join(msgText, "\n")
+				} else {
+					msg.Text = "Оценок нет :("
+				}
 			}
 
 			if _, err := bot.Send(msg); err != nil {
