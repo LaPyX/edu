@@ -41,7 +41,7 @@ type EduFilter struct {
 type Edu struct {
 	client          *http.Client
 	cookie          []*http.Cookie
-	quarterSubjects []*SchoolSubject
+	quarterSubjects map[string][]*SchoolSubject
 }
 
 func newEdu() *Edu {
@@ -54,6 +54,7 @@ func newEdu() *Edu {
 }
 
 func checkAuth() []*http.Cookie {
+	// TODO redis
 	b, err := os.ReadFile("cookie.cache")
 	if err != nil {
 		fmt.Println(err)
@@ -182,6 +183,8 @@ func (edu *Edu) loginRequest(login string, password string) {
 	}
 
 	j, _ := json.Marshal(edu.client.Jar.Cookies(req.URL))
+
+	// TODO redis
 	saveToFile("cookie.cache", string(j))
 	saveToFile("1.html", string(body))
 }
@@ -250,6 +253,10 @@ func (edu *Edu) getEduByDay(filter *EduFilter) []*SchoolSubject {
 			task := tr.Find("td").Eq(2).Text()
 			comment := tr.Find("td").Eq(3).Text()
 
+			if subject == "" {
+				return
+			}
+
 			var marks []*Mark
 			tr.Find("td").Eq(4).Find(".tooltip-sts").Each(func(_ int, div *goquery.Selection) {
 				reason := div.Find(".tooltip-sts-content").First().Text()
@@ -280,8 +287,9 @@ func (edu *Edu) getEduByDay(filter *EduFilter) []*SchoolSubject {
 }
 
 func (edu *Edu) getEduByQuarter(filter *EduFilter) []*SchoolSubject {
-	if edu.quarterSubjects != nil {
-		return edu.quarterSubjects
+	// TODO redis
+	if edu.quarterSubjects[filter.DiaryType] != nil {
+		return edu.quarterSubjects[filter.DiaryType]
 	}
 
 	fmt.Println("Get estimates by quarter: " + filter.DiaryType)
@@ -315,7 +323,7 @@ func (edu *Edu) getEduByQuarter(filter *EduFilter) []*SchoolSubject {
 			schoolSubjects = append(schoolSubjects, sd)
 		})
 
-		edu.quarterSubjects = schoolSubjects
+		edu.quarterSubjects[filter.DiaryType] = schoolSubjects
 
 		return schoolSubjects
 	}
@@ -337,12 +345,12 @@ func (edu *Edu) getEduBySubject(filter *EduFilter) *SchoolSubject {
 	return nil
 }
 
-func (edu *Edu) getSubjects(filter *EduFilter) []string {
+func (edu *Edu) getSubjects(filter *EduFilter) map[int]string {
 	fmt.Println("Get subjects")
 
-	var subjects []string
-	for _, v := range edu.getEduByQuarter(filter) {
-		subjects = append(subjects, v.Subject)
+	var subjects = make(map[int]string)
+	for k, v := range edu.getEduByQuarter(filter) {
+		subjects[k] = v.Subject
 	}
 
 	return subjects
