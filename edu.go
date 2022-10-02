@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/PuerkitoBio/goquery"
+	"github.com/go-redis/redis"
 	"golang.org/x/net/html"
 	"io/ioutil"
 	"log"
@@ -42,14 +43,14 @@ type Edu struct {
 	client          *http.Client
 	cookie          []*http.Cookie
 	quarterSubjects map[string][]*SchoolSubject
+	redis           *redis.Client
 }
 
 func newEdu() *Edu {
-	var client = newClient()
-
 	return &Edu{
-		client: client,
+		client: newClient(),
 		cookie: checkAuth(),
+		redis:  newRedis(),
 	}
 }
 
@@ -77,6 +78,21 @@ func newClient() *http.Client {
 	return &http.Client{
 		Jar: jar,
 	}
+}
+
+func newRedis() *redis.Client {
+	client := redis.NewClient(&redis.Options{
+		Addr:     os.Getenv("REDIS_HOST"),
+		Password: os.Getenv("REDIS_PASSWORD"),
+		DB:       0,
+	})
+
+	_, err := client.Ping().Result()
+	if err != nil {
+		panic(err)
+	}
+
+	return client
 }
 
 func queryDoc(data string) *goquery.Document {
@@ -141,7 +157,6 @@ func (edu *Edu) eduRequest(filter *EduFilter) []byte {
 	}
 
 	fmt.Println(res.StatusCode)
-	saveToFile("1.html", string(body))
 
 	return body
 }

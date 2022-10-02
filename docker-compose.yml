@@ -1,0 +1,20 @@
+version: "3.9"
+services:
+  app:
+    container_name: edu-app
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - .:/opt/calls
+
+  redis:
+    image: redis:3.2.1-alpine
+    container_name: edu-redis
+    ports:
+      - "6379:6379"
+    depends_on:
+      - app
