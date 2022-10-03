@@ -50,7 +50,7 @@ func newEdu() *Edu {
 	return &Edu{
 		client: newClient(),
 		cookie: checkAuth(),
-		redis:  newRedis(),
+		//redis:  newRedis(),
 	}
 }
 
