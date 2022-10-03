@@ -48,8 +48,9 @@ type Edu struct {
 
 func newEdu() *Edu {
 	edu := &Edu{
-		client: newClient(),
-		cookie: checkAuth(),
+		client:          newClient(),
+		cookie:          checkAuth(),
+		quarterSubjects: make(map[string][]*SchoolSubject),
 		//redis:  newRedis(),
 	}
 
