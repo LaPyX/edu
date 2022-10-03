@@ -2,3 +2,5 @@
 /.idea
 cookie.cache
 .env
+pid.lock
+tmp
