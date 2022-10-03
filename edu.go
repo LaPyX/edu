@@ -47,11 +47,17 @@ type Edu struct {
 }
 
 func newEdu() *Edu {
-	return &Edu{
+	edu := &Edu{
 		client: newClient(),
 		cookie: checkAuth(),
 		//redis:  newRedis(),
 	}
+
+	if edu.cookie == nil {
+		edu.cookie = edu.loginRequest("9046762614", os.Getenv("EDU_PASSWORD"))
+	}
+
+	return edu
 }
 
 func checkAuth() []*http.Cookie {
@@ -161,7 +167,7 @@ func (edu *Edu) eduRequest(filter *EduFilter) []byte {
 	return body
 }
 
-func (edu *Edu) loginRequest(login string, password string) {
+func (edu *Edu) loginRequest(login string, password string) []*http.Cookie {
 	fmt.Println("Login auth")
 	urlUslugi := "https://uslugi.tatarstan.ru/user/login"
 	method := "POST"
@@ -174,34 +180,36 @@ func (edu *Edu) loginRequest(login string, password string) {
 	err := writer.Close()
 	if err != nil {
 		fmt.Println(err)
-		return
+		return nil
 	}
 
 	req, err := http.NewRequest(method, urlUslugi, payload)
 	if err != nil {
 		fmt.Println(err)
-		return
+		return nil
 	}
 
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	res, err := edu.client.Do(req)
 	if err != nil {
 		fmt.Println(err)
-		return
+		return nil
 	}
 	defer res.Body.Close()
 
-	body, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
+	//body, err := ioutil.ReadAll(res.Body)
+	//if err != nil {
+	//	fmt.Println(err)
+	//	return
+	//}
 
-	j, _ := json.Marshal(edu.client.Jar.Cookies(req.URL))
+	cookie := edu.client.Jar.Cookies(req.URL)
+	j, _ := json.Marshal(cookie)
 
 	// TODO redis
 	saveToFile("cookie.cache", string(j))
-	saveToFile("1.html", string(body))
+
+	return cookie
 }
 
 func (edu *Edu) getEduByWeek(filter *EduFilter) []*SchoolSubject {
