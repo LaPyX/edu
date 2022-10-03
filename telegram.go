@@ -82,7 +82,7 @@ func (t *Telegram) Run() {
 		log.Panic(err)
 	}
 
-	t.bot.Debug = true
+	t.bot.Debug, _ = strconv.ParseBool(os.Getenv("DEBUG"))
 
 	log.Printf("Authorized on account %s", t.bot.Self.UserName)
 
