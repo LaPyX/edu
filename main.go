@@ -18,8 +18,6 @@ const (
 )
 
 func main() {
-	KillExistsProcess()
-
 	err := godotenv.Load()
 	if err != nil {
 		log.Fatal("Error loading .env file")
@@ -29,9 +27,6 @@ func main() {
 	var telegramBot = newTelegram(edu)
 
 	telegramBot.Run()
-
-	// Run until CTRL+C.
-	select {}
 }
 
 // KillExistsProcess убивает запущенный до этого процесс, чтобы не работало 2 демона одновременно

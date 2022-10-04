@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"github.com/PuerkitoBio/goquery"
@@ -84,6 +85,14 @@ func newClient() *http.Client {
 
 	return &http.Client{
 		Jar: jar,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				// See comment above.
+				// UNSAFE!
+				// DON'T USE IN PRODUCTION!
+				InsecureSkipVerify: true,
+			},
+		},
 	}
 }
 

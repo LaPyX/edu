@@ -77,7 +77,7 @@ func newTelegram(edu *Edu) *Telegram {
 func (t *Telegram) Run() {
 	var err error
 
-	t.bot, err = tgbotapi.NewBotAPI(os.Getenv("TELEGRAM_APITOKEN"))
+	t.bot, err = tgbotapi.NewBotAPIWithClient(os.Getenv("TELEGRAM_APITOKEN"), tgbotapi.APIEndpoint, t.edu.client)
 	if err != nil {
 		log.Panic(err)
 	}
@@ -201,6 +201,7 @@ func (t *Telegram) GetUpdatesChan() {
 				ret := t.edu.getEduBySubject(&EduFilter{
 					ChildName: ChildName,
 					Subject:   subject,
+					DiaryType: Quarter1,
 				})
 
 				msg.Text = t.MarksMessageText("", []*SchoolSubject{ret})
@@ -299,7 +300,7 @@ func (t *Telegram) ScheduleMessageText(header string, subjects []*SchoolSubject)
 	for _, v := range subjects {
 		var task string
 		if task = v.Task; task == "" {
-			task = "Нет задания"
+			task = "-"
 		}
 
 		msgText = append(msgText, "✍️\\["+v.Time+"] *"+v.Subject+"*\n📘"+task+"\n")
