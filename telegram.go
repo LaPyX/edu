@@ -328,11 +328,20 @@ func (t *Telegram) MarksMessageText(header string, subjects []*SchoolSubject) st
 				marks = append(marks, m.Value)
 			}
 		}
-		msgText = append(msgText, v.Subject+": "+strings.Join(marks, ", "))
+
+		text := "✍*" + v.Subject + "*: " + strings.Join(marks, ", ")
+		if v.AvgMark != "" {
+			text += "\nСредняя: " + v.AvgMark
+			if v.Total != "" {
+				text += ", Итог: " + v.AvgMark
+			}
+		}
+
+		msgText = append(msgText, text)
 	}
 
 	if msgText != nil {
-		return header + "\n\n" + strings.Join(msgText, "\n")
+		return header + "\n\n" + strings.Join(msgText, "\n\n")
 	} else {
 		return "Оценок нет :("
 	}
