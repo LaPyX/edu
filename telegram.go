@@ -1,12 +1,16 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"log"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -17,8 +21,12 @@ const (
 )
 
 const (
-	ButtonStart  = "start"
-	ButtonFinish = "finish"
+	ButtonStart    = "start"
+	ButtonRegister = "register"
+	ButtonFinish   = "finish"
+	ButtonExit     = "exit"
+	ButtonCancel   = "cancel"
+	ButtonMenu     = "menu"
 
 	ButtonMarks    = "marks"
 	ButtonSchedule = "schedule"
@@ -35,14 +43,65 @@ const (
 	ButtonScheduleWeek       = "schedule_week"
 	ButtonScheduleDate       = "schedule_date"
 	ButtonSelectScheduleDate = "select_schedule_date"
+	ButtonChildrenList       = "children_list"
+	ButtonSelectChild        = "select_child"
+	ButtonSetting            = "settings"
+	ButtonUserInfo           = "user_info"
+	ButtonUsers              = "users"
+	ButtonUpdateUser         = "update_user"
+	ButtonSelectUser         = "select_user"
+	ButtonDeleteUser         = "delete_user"
+	ButtonSelectParentChild  = "select_parent_child"
+	ButtonSelectIsParent     = ButtonSelectParentChild + ":parent"
+	ButtonSelectIsChild      = ButtonSelectParentChild + ":child"
+)
+
+const (
+	RegisterLogin    = "register_login"
+	RegisterPassword = "register_password"
 )
 
 var ListQuarter = []string{Quarter1, Quarter2, Quarter3, Quarter4}
 
+var UserInfoKeyboard = tgbotapi.NewInlineKeyboardMarkup(
+	InlineKeyboardButtonRow("Обновить", ButtonUpdateUser),
+	BackKeyboardButtonRow(ButtonSetting),
+)
+
+var settingKeyboard = tgbotapi.NewInlineKeyboardMarkup(
+	InlineKeyboardButtonRow("Ваши данные", ButtonUserInfo),
+	BackKeyboardButtonRow(ButtonStart),
+)
+
+var settingAdminKeyboard = tgbotapi.NewInlineKeyboardMarkup(
+	InlineKeyboardButtonRow("Ваши данные", ButtonUserInfo),
+	InlineKeyboardButtonRow("Пользователи", ButtonUsers),
+	BackKeyboardButtonRow(ButtonStart),
+)
+
+var childKeyboard = tgbotapi.NewInlineKeyboardMarkup(
+	InlineKeyboardButtonRow("Выбрать учащегося", ButtonChildrenList),
+	InlineKeyboardButtonRow("Выйти", ButtonExit),
+)
+
+var parentChildKeyboard = tgbotapi.NewInlineKeyboardMarkup(
+	InlineKeyboardButtonRow("Я родитель", ButtonSelectIsParent),
+	InlineKeyboardButtonRow("Я ребенок", ButtonSelectIsChild),
+	InlineKeyboardButtonRow("Выйти", ButtonExit),
+)
+
+var registerKeyboard = tgbotapi.NewInlineKeyboardMarkup(
+	InlineKeyboardButtonRow("Регистрация", ButtonRegister),
+	InlineKeyboardButtonRow("Выйти", ButtonExit),
+)
+
 var commandsKeyboard = tgbotapi.NewInlineKeyboardMarkup(
 	InlineKeyboardButtonRow("Оценки", ButtonMarks),
 	InlineKeyboardButtonRow("Расписание", ButtonSchedule),
+	InlineKeyboardButtonRow("Учащийся", ButtonChildrenList),
+	InlineKeyboardButtonRow("Настройки", ButtonSetting),
 	InlineKeyboardButtonRow("Завершить", ButtonFinish),
+	InlineKeyboardButtonRow("Выйти", ButtonExit),
 )
 
 var markKeyboard = tgbotapi.NewInlineKeyboardMarkup(
@@ -50,6 +109,7 @@ var markKeyboard = tgbotapi.NewInlineKeyboardMarkup(
 	InlineKeyboardButtonRow("Оценки за неделю", ButtonMarkWeek),
 	InlineKeyboardButtonRow("Оценки за четверть", ButtonMarkQuarter),
 	InlineKeyboardButtonRow("Оценки по предмету", ButtonMarkSubject),
+	//InlineKeyboardButtonRow("Оценки за прошлую неделю", ButtonMarkSubject),
 	BackKeyboardButtonRow(ButtonStart),
 	InlineKeyboardButtonRow("Завершить", ButtonFinish),
 )
@@ -59,6 +119,7 @@ var scheduleKeyboard = tgbotapi.NewInlineKeyboardMarkup(
 	InlineKeyboardButtonRow("Расписание на завтра", ButtonScheduleTomorrow),
 	InlineKeyboardButtonRow("Расписание за неделю", ButtonScheduleWeek),
 	InlineKeyboardButtonRow("Расписание за дату", ButtonScheduleDate),
+	//InlineKeyboardButtonRow("Расписание за прошлую неделю", ButtonScheduleDate),
 	BackKeyboardButtonRow(ButtonStart),
 	InlineKeyboardButtonRow("Завершить", ButtonFinish),
 )
@@ -95,13 +156,13 @@ func (t *Telegram) GetUpdatesChan() {
 
 	updates := t.bot.GetUpdatesChan(u)
 
+	guard := &Guard{redis: t.edu.redis}
 	for update := range updates {
-		//m, _ := json.Marshal(update)
-		//fmt.Println("---------------------")
-		//fmt.Println(string(m))
-		//fmt.Println("---------------------")
 
 		if update.Message != nil {
+			user := guard.auth(update.Message.From)
+			t.edu.setCookie(user.Cookie)
+
 			// Construct a new message from the given chat ID and containing
 			// the text that we received.
 			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Выберите действие:")
@@ -110,7 +171,61 @@ func (t *Telegram) GetUpdatesChan() {
 				// Extract the command from the Message.
 				switch update.Message.Command() {
 				case ButtonStart:
-					msg.ReplyMarkup = commandsKeyboard
+					if user.IsAuth {
+						if len(user.Children) == 0 {
+							msg.ReplyMarkup = parentChildKeyboard
+						} else {
+							msg.Text = user.ChildName + "\n\n" + msg.Text
+							msg.ReplyMarkup = commandsKeyboard
+						}
+					} else {
+						msg.ReplyMarkup = registerKeyboard
+					}
+				case ButtonMenu:
+					if user.IsAuth && user.ChildName != "" {
+						msg.Text = user.ChildName + "\n\n" + msg.Text
+						msg.ReplyMarkup = commandsKeyboard
+					} else {
+						msg.Text = "Попробуйте начать с этого /start"
+					}
+				}
+			} else if user.Command != "" {
+				switch user.Command {
+				case RegisterLogin:
+					user.Command = RegisterPassword
+					//  validate login
+					j, _ := json.Marshal(&RegisterEdu{Login: update.Message.Text})
+					user.CommandJson = j
+					guard.saveUser(user)
+					msg.Text = "Введите пароль:"
+					msg.ReplyMarkup = CancelKeyboardButtonInline(ButtonRegister)
+				case RegisterPassword:
+					var regedu *RegisterEdu
+					err := json.Unmarshal(user.CommandJson, &regedu)
+					if err == nil {
+						// validate password
+						regedu.Password = update.Message.Text
+						cookie, err := t.edu.loginRequest(regedu)
+						if err == nil {
+							msg.Text = "Регистрация прошла успешно.\n\nВыберите действие:"
+							user.Command = ""
+							user.CommandJson = nil
+							user.IsAuth = true
+							user.Cookie = cookie
+							user.Children = nil
+							user.ChildName = ""
+							user.LoginEdu = regedu.Login
+							guard.saveUser(user)
+							msg.ReplyMarkup = parentChildKeyboard
+						} else {
+							msg.Text = err.Error() + "\n\nВведите пароль:"
+							msg.ReplyMarkup = CancelKeyboardButtonInline(ButtonRegister)
+						}
+					} else {
+						fmt.Println(err)
+						msg.Text = "Ошибка, извините мы уже работаем над ее решением"
+						msg.ReplyMarkup = CancelKeyboardButtonInline(ButtonRegister)
+					}
 				}
 			}
 
@@ -119,32 +234,167 @@ func (t *Telegram) GetUpdatesChan() {
 				panic(err)
 			}
 		} else if update.CallbackQuery != nil {
-			msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Выберите действие:")
+			user := guard.auth(update.CallbackQuery.From)
+			t.edu.setCookie(user.Cookie)
+
+			msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, user.ChildName+"\n\n")
 			t.RemoveCallbackMessage(update.CallbackQuery)
 			data, arguments := t.getData(update.CallbackQuery.Data)
 
+			if !user.IsAuth && data != ButtonRegister {
+				data = ButtonCancel
+			}
+
 			switch data {
+			case ButtonSetting:
+				msg.Text = "Настройки: \n"
+				if user.isAdmin() {
+					msg.ReplyMarkup = settingAdminKeyboard
+				} else {
+					msg.ReplyMarkup = settingKeyboard
+				}
+			case ButtonUserInfo:
+				msg.Text = t.UserInfo(user)
+				msg.ReplyMarkup = UserInfoKeyboard
+			case ButtonUpdateUser:
+				user.fill(update.CallbackQuery.From)
+				parent, _ := t.findParentUser(user)
+				if parent != nil {
+					user.ParentId = parent.Id
+				}
+				guard.saveUser(user)
+				msg.Text = t.UserInfo(user)
+				msg.ReplyMarkup = UserInfoKeyboard
+			case ButtonRegister:
+				user.Command = RegisterLogin
+				guard.saveUser(user)
+				msg.Text = "Введите логин:"
+				msg.ReplyMarkup = CancelKeyboardButtonInline(ButtonCancel)
+			case ButtonUsers:
+				keys, _ := t.edu.redis.Keys(PrefixUser + ":*").Result()
+				var keyboards [][]tgbotapi.InlineKeyboardButton
+				for _, key := range keys {
+					var user *User
+					user, err := t.getUser(key)
+					if err != nil {
+						continue
+					}
+
+					name := fmt.Sprintf("%s %s(Id: %s)", user.FirstName, user.LastName, user.Id)
+					keyboards = append(keyboards, InlineKeyboardButtonRow(name, "select_user:"+user.Id))
+				}
+
+				keyboards = append(keyboards, BackKeyboardButtonRow(ButtonSetting))
+
+				msg.Text = fmt.Sprintf("Пользователи (%s): \n", strconv.Itoa(len(keyboards)-1))
+				msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(keyboards...)
+			case ButtonSelectUser:
+				id := arguments[0]
+				user := guard.find(arguments[0])
+
+				if user == nil {
+					msg.Text = fmt.Sprintf("Пользователь ID%s не найден", id)
+					msg.ReplyMarkup = BackKeyboardButtonInline(ButtonUsers)
+					break
+				}
+				msg.Text = t.UserInfo(user)
+				msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+					InlineKeyboardButtonRow("Удалить", fmt.Sprintf("%s:%s", ButtonDeleteUser, id)),
+					BackKeyboardButtonRow(ButtonUsers),
+				)
+			case ButtonDeleteUser:
+				id := arguments[0]
+				guard.removeUser(id)
+				msg.Text = fmt.Sprintf("Пользователь ID:%s удален.", id)
+				msg.ReplyMarkup = BackKeyboardButtonInline(ButtonUsers)
+			case ButtonExit:
+				guard.logout(user)
+				msg.Text = "✌️ До встречи"
+			case ButtonCancel:
+				guard.logout(user)
+				msg.Text = "Выберите действие:"
+				msg.ReplyMarkup = registerKeyboard
 			case ButtonStart:
+				msg.Text += "Выберите действие:"
 				msg.ReplyMarkup = commandsKeyboard
 			case ButtonMarks:
+				msg.Text += "Выберите действие:"
 				msg.ReplyMarkup = markKeyboard
 			case ButtonSchedule:
+				msg.Text += "Выберите действие:"
 				msg.ReplyMarkup = scheduleKeyboard
+			case ButtonSelectParentChild:
+				if arguments[0] == "parent" {
+					user.IsChildren = false
+					user.ParentId = ""
+				} else {
+					user.IsChildren = true
+					parent, _ := t.findParentUser(user)
+					if parent != nil {
+						user.ParentId = parent.Id
+					}
+				}
+
+				guard.saveUser(user)
+				if len(user.Children) == 0 {
+					msg.Text = "Выберите действие:"
+					msg.ReplyMarkup = childKeyboard
+				} else {
+					msg.Text = user.ChildName + "\n\nВыберите действие:"
+					msg.ReplyMarkup = commandsKeyboard
+				}
+			case ButtonSelectIsParent:
+				user.IsChildren = true
+				guard.saveUser(user)
+				if len(user.Children) == 0 {
+					msg.ReplyMarkup = childKeyboard
+				} else {
+					msg.Text = user.ChildName + "\n\nВыберите действие:"
+					msg.ReplyMarkup = commandsKeyboard
+				}
+			case ButtonChildrenList:
+				user.Children = t.edu.getChildren(&EduFilter{})
+				guard.saveUser(user)
+
+				var keyboards [][]tgbotapi.InlineKeyboardButton
+				for i, name := range user.Children {
+					keyboards = append(keyboards, InlineKeyboardButtonRow(name, "select_child:"+strconv.Itoa(i)))
+				}
+
+				keyboards = append(keyboards, BackKeyboardButtonRow(ButtonMarks))
+
+				msg.Text = "Выберите учащегося:"
+				if len(user.Children) == 0 {
+					msg.Text += "\n\nСписок учащихся пуст :("
+				}
+				msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(keyboards...)
+			case ButtonSelectChild:
+				childKey, err := strconv.Atoi(arguments[0])
+				if err != nil {
+					msg.Text = "Неизвестный аргумент: " + arguments[0]
+					break
+				}
+
+				childName := user.Children[childKey]
+				user.ChildName = childName
+				guard.saveUser(user)
+				msg.Text = user.ChildName + "\n\nВыберите действие:"
+				msg.ReplyMarkup = commandsKeyboard
 			case ButtonFinish:
 				msg.Text = "✌️ До встречи"
 			case ButtonMarkDay:
 				ret := t.edu.getEduByDay(&EduFilter{
-					ChildName: ChildName,
+					ChildName: user.ChildName,
 				})
 
-				msg.Text = t.MarksMessageText("Оценки за день: ", ret)
+				msg.Text += t.MarksMessageText("Оценки за день: ", ret)
 				msg.ReplyMarkup = BackKeyboardButtonInline(ButtonMarks)
 			case ButtonMarkWeek:
 				ret := t.edu.getEduByWeek(&EduFilter{
-					ChildName: ChildName,
+					ChildName: user.ChildName,
 				})
 
-				msg.Text = t.MarksMessageText("Оценки за неделю: ", ret)
+				msg.Text += t.MarksMessageText("Оценки за неделю: ", ret)
 				msg.ReplyMarkup = BackKeyboardButtonInline(ButtonMarks)
 			case ButtonMarkQuarter:
 				var keyboards [][]tgbotapi.InlineKeyboardButton
@@ -159,15 +409,15 @@ func (t *Telegram) GetUpdatesChan() {
 			case ButtonSelectMarkQuarter:
 				quarter := arguments[0]
 				ret := t.edu.getEduByQuarter(&EduFilter{
-					ChildName: ChildName,
+					ChildName: user.ChildName,
 					DiaryType: quarter,
 				})
 
-				msg.Text = t.MarksMessageText("Оценки за "+quarter+" четверть: ", ret)
+				msg.Text += t.MarksMessageText("Оценки за "+quarter+" четверть: ", ret)
 				msg.ReplyMarkup = BackKeyboardButtonInline(ButtonMarks)
 			case ButtonMarkSubject:
 				subjects := t.edu.getSubjects(&EduFilter{
-					ChildName: ChildName,
+					ChildName: user.ChildName,
 					DiaryType: Quarter1,
 				})
 
@@ -188,7 +438,7 @@ func (t *Telegram) GetUpdatesChan() {
 				}
 
 				subjects := t.edu.getSubjects(&EduFilter{
-					ChildName: ChildName,
+					ChildName: user.ChildName,
 					DiaryType: Quarter1,
 				})
 
@@ -199,46 +449,46 @@ func (t *Telegram) GetUpdatesChan() {
 				}
 
 				ret := t.edu.getEduBySubject(&EduFilter{
-					ChildName: ChildName,
+					ChildName: user.ChildName,
 					Subject:   subject,
 					DiaryType: Quarter1,
 				})
 
-				msg.Text = t.MarksMessageText("", []*SchoolSubject{ret})
+				msg.Text += t.MarksMessageText("", []*SchoolSubject{ret})
 				msg.ReplyMarkup = BackKeyboardButtonInline(ButtonMarkSubject)
 			case ButtonScheduleTomorrow:
 				ret := t.edu.getEduByDay(&EduFilter{
-					ChildName: ChildName,
+					ChildName: user.ChildName,
 					Date:      time.Now().Add(24 * time.Hour).Format(DDMMYYYY),
 				})
 
-				msg.Text = t.ScheduleMessageText("Расписание на завтра: ", ret)
+				msg.Text += t.ScheduleMessageText("Расписание на завтра: ", ret)
 				msg.ReplyMarkup = BackKeyboardButtonInline(ButtonSchedule)
 			case ButtonScheduleToday:
 				ret := t.edu.getEduByDay(&EduFilter{
-					ChildName: ChildName,
+					ChildName: user.ChildName,
 					Date:      time.Now().Format(DDMMYYYY),
 				})
 
-				msg.Text = t.ScheduleMessageText("Расписание на сегодня: ", ret)
+				msg.Text += t.ScheduleMessageText("Расписание на сегодня: ", ret)
 				msg.ReplyMarkup = BackKeyboardButtonInline(ButtonSchedule)
 			case ButtonScheduleWeek:
 				ret := t.edu.getEduByWeek(&EduFilter{
-					ChildName: ChildName,
+					ChildName: user.ChildName,
 				})
 
-				msg.Text = t.ScheduleWeekMessageText("Расписание за неделю: ", ret)
+				msg.Text += t.ScheduleWeekMessageText("Расписание за неделю: ", ret)
 				msg.ReplyMarkup = BackKeyboardButtonInline(ButtonSchedule)
 			case ButtonScheduleDate:
 				msg.Text = "За какой день, хотите получить расписание (укажите дату в формате d.m.Y):"
 				msg.ReplyMarkup = BackKeyboardButtonInline(ButtonSchedule)
 			case ButtonSelectScheduleDate:
 				ret := t.edu.getEduByDay(&EduFilter{
-					ChildName: ChildName,
+					ChildName: user.ChildName,
 					Date:      time.Now().Format(DDMMYYYY),
 				})
 
-				msg.Text = t.ScheduleMessageText("Расписание на дату: ", ret)
+				msg.Text += t.ScheduleMessageText("Расписание на дату: ", ret)
 				msg.ReplyMarkup = BackKeyboardButtonInline(ButtonSchedule)
 			}
 
@@ -341,10 +591,67 @@ func (t *Telegram) MarksMessageText(header string, subjects []*SchoolSubject) st
 	}
 
 	if msgText != nil {
-		return header + "\n\n" + strings.Join(msgText, "\n\n")
+		if header != "" {
+			header += "\n\n"
+		}
+		return header + strings.Join(msgText, "\n\n")
 	} else {
 		return "Оценок нет :("
 	}
+}
+
+func (t *Telegram) UserInfo(user *User) string {
+	header := fmt.Sprintf("Данные о пользователе ID: %s", user.Id)
+
+	if user.IsChildren {
+		header += " - (Ребёнок)"
+	} else {
+		header += " - (Родитель)"
+	}
+
+	body := fmt.Sprintf("ID: %s \n", user.Id)
+	body += fmt.Sprintf("UserName: @%s \n", t.QuoteMeta(user.UserName))
+	body += fmt.Sprintf("Имя: %s \n", t.QuoteMeta(user.FirstName))
+	body += fmt.Sprintf("Фамилия: %s \n", t.QuoteMeta(user.LastName))
+	if !user.IsChildren {
+		body += fmt.Sprintf("Дети: %s \n", t.QuoteMeta(strings.Join(user.Children, ", ")))
+	} else if user.ParentId != "" {
+		parent, _ := t.getUserById(user.ParentId)
+		if parent != nil {
+			body += fmt.Sprintf("Родитель: @%s (%s %s ID:%s) \n", t.QuoteMeta(parent.UserName), t.QuoteMeta(parent.FirstName), t.QuoteMeta(parent.LastName), parent.Id)
+		}
+	}
+	body += fmt.Sprintf("Выбранный учащийся: %s", t.QuoteMeta(user.ChildName))
+
+	return header + "\n\n" + body
+}
+
+func (t *Telegram) findParentUser(u *User) (*User, error) {
+	keys, _ := t.edu.redis.Keys(PrefixUser + ":*").Result()
+	for _, key := range keys {
+		user, _ := t.getUser(key)
+		if user != nil && u.Id != user.Id && user.LoginEdu == u.LoginEdu && !user.IsChildren {
+			return user, nil
+		}
+	}
+	return nil, errors.New("Parent not found")
+}
+
+func (t *Telegram) getUserById(id string) (*User, error) {
+	return t.getUser(KeyUser(id))
+}
+
+func (t *Telegram) getUser(prefixKey string) (*User, error) {
+	var user *User
+	u, _ := t.edu.redis.Get(prefixKey).Bytes()
+	err := json.Unmarshal(u, &user)
+	if err != nil {
+		return nil, err
+	}
+	if user.Id == "" {
+		return nil, errors.New("user id: " + prefixKey + " not found")
+	}
+	return user, nil
 }
 
 func InlineKeyboardButtonRow(name string, data string) []tgbotapi.InlineKeyboardButton {
@@ -361,4 +668,45 @@ func BackKeyboardButtonInline(data string) tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		BackKeyboardButtonRow(data),
 	)
+}
+
+func CancelKeyboardButtonInline(data string) tgbotapi.InlineKeyboardMarkup {
+	return tgbotapi.NewInlineKeyboardMarkup(
+		InlineKeyboardButtonRow("Отменить", data),
+	)
+}
+
+func (t *Telegram) QuoteMeta(s string) string {
+	var specialBytes [16]byte
+	for _, b := range []byte(`_-\.+*?()|[]{}^$`) {
+		specialBytes[b%16] |= 1 << (b / 16)
+	}
+
+	special := func(b byte) bool {
+		return b < utf8.RuneSelf && specialBytes[b%16]&(1<<(b/16)) != 0
+	}
+	// A byte loop is correct because all metacharacters are ASCII.
+	var i int
+	for i = 0; i < len(s); i++ {
+		if special(s[i]) {
+			break
+		}
+	}
+	// No meta characters found, so return original string.
+	if i >= len(s) {
+		return s
+	}
+
+	b := make([]byte, 2*len(s)-i)
+	copy(b, s[:i])
+	j := i
+	for ; i < len(s); i++ {
+		if special(s[i]) {
+			b[j] = '\\'
+			j++
+		}
+		b[j] = s[i]
+		j++
+	}
+	return string(b[:j])
 }

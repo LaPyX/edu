@@ -3,12 +3,15 @@ module main
 go 1.17
 
 require (
-	github.com/PuerkitoBio/goquery v1.8.0 // indirect
+	github.com/PuerkitoBio/goquery v1.8.0
+	github.com/go-redis/redis v6.15.9+incompatible
+	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
+	github.com/joho/godotenv v1.4.0
+	golang.org/x/net v0.1.0
+)
+
+require (
 	github.com/andybalholm/cascadia v1.3.1 // indirect
-	github.com/denisbrodbeck/striphtmltags v6.6.6+incompatible // indirect
-	github.com/go-redis/redis v6.15.9+incompatible // indirect
-	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1 // indirect
-	github.com/joho/godotenv v1.4.0 // indirect
-	github.com/juju/fslock v0.0.0-20160525022230-4d5c94c67b4b // indirect
-	golang.org/x/net v0.0.0-20220923203811-8be639271d50 // indirect
+	github.com/onsi/ginkgo v1.16.5 // indirect
+	github.com/onsi/gomega v1.24.0 // indirect
 )

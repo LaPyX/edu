@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-redis/redis"
@@ -12,10 +13,19 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
+	"net/http/cookiejar"
 	"os"
 	"regexp"
 	"strings"
+	"time"
 )
+
+const PrefixSubject = "subjects"
+
+type RegisterEdu struct {
+	Login    string `json:"login"`
+	Password string `json:"password"`
+}
 
 type Mark struct {
 	Value  string `json:"value"`
@@ -49,15 +59,15 @@ type Edu struct {
 
 func newEdu() *Edu {
 	edu := &Edu{
-		client:          newClient(),
-		cookie:          checkAuth(),
+		client: newClient(),
+		//cookie:          checkAuth(),
 		quarterSubjects: make(map[string][]*SchoolSubject),
-		//redis:  newRedis(),
+		redis:           newRedis(),
 	}
 
-	if edu.cookie == nil {
-		edu.cookie = edu.loginRequest("9046762614", os.Getenv("EDU_PASSWORD"))
-	}
+	//if edu.cookie == nil {
+	//	edu.cookie = edu.loginRequest("9046762614", os.Getenv("EDU_PASSWORD"))
+	//}
 
 	return edu
 }
@@ -81,7 +91,7 @@ func checkAuth() []*http.Cookie {
 }
 
 func newClient() *http.Client {
-	jar := NewJar()
+	jar, _ := cookiejar.New(nil)
 
 	return &http.Client{
 		Jar: jar,
@@ -177,49 +187,45 @@ func (edu *Edu) eduRequest(filter *EduFilter) []byte {
 	return body
 }
 
-func (edu *Edu) loginRequest(login string, password string) []*http.Cookie {
-	fmt.Println("Login auth")
+func (edu *Edu) loginRequest(reg *RegisterEdu) ([]*http.Cookie, error) {
+	// чтобы очистить куки застрявшие от другой авторизации
+	edu.client.Jar, _ = cookiejar.New(nil)
+	fmt.Println("Login auth", reg.Login)
 	urlUslugi := "https://uslugi.tatarstan.ru/user/login"
 	method := "POST"
 
 	payload := &bytes.Buffer{}
 	writer := multipart.NewWriter(payload)
-	_ = writer.WriteField("user_login_form_model[phone_number]", login)
-	_ = writer.WriteField("user_login_form_model[password]", password)
+	_ = writer.WriteField("user_login_form_model[phone_number]", reg.Login)
+	_ = writer.WriteField("user_login_form_model[password]", reg.Password)
 	_ = writer.WriteField("user_login_form_model[remember_me]", "1")
 	err := writer.Close()
 	if err != nil {
 		fmt.Println(err)
-		return nil
+		return nil, err
 	}
 
 	req, err := http.NewRequest(method, urlUslugi, payload)
 	if err != nil {
 		fmt.Println(err)
-		return nil
+		return nil, err
 	}
 
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	res, err := edu.client.Do(req)
 	if err != nil {
 		fmt.Println(err)
-		return nil
+		return nil, err
 	}
 	defer res.Body.Close()
 
-	//body, err := ioutil.ReadAll(res.Body)
-	//if err != nil {
-	//	fmt.Println(err)
-	//	return
-	//}
-
 	cookie := edu.client.Jar.Cookies(req.URL)
-	j, _ := json.Marshal(cookie)
+	body, err := ioutil.ReadAll(res.Body)
+	if err == nil && strings.Contains(string(body), "Неверный логин или пароль") {
+		return nil, errors.New("Неверный логин или пароль")
+	}
 
-	// TODO redis
-	saveToFile("cookie.cache", string(j))
-
-	return cookie
+	return cookie, nil
 }
 
 func (edu *Edu) getEduByWeek(filter *EduFilter) []*SchoolSubject {
@@ -319,10 +325,41 @@ func (edu *Edu) getEduByDay(filter *EduFilter) []*SchoolSubject {
 	return nil
 }
 
+func (edu *Edu) saveSchoolSubject(ChildName string, DiaryType string, subjects []*SchoolSubject) bool {
+	j, err := json.Marshal(subjects)
+	if err != nil {
+		fmt.Println(err)
+		return false
+	}
+
+	err = edu.redis.SetNX(KeySubject(ChildName, DiaryType), j, 10*time.Minute).Err()
+	if err != nil {
+		fmt.Println(err)
+		return false
+	}
+	return true
+}
+
+func (edu *Edu) getSchoolSubject(ChildName string, DiaryType string) []*SchoolSubject {
+	fmt.Println(ChildName, DiaryType)
+	var subj []*SchoolSubject
+	j, err := edu.redis.Get(KeySubject(ChildName, DiaryType)).Bytes()
+	err = json.Unmarshal(j, &subj)
+	if err != nil {
+		fmt.Println(err)
+		return nil
+	}
+	fmt.Println(j)
+	return subj
+}
+
+func KeySubject(ChildName string, DiaryType string) string {
+	return fmt.Sprintf("%s:%s_%s", PrefixSubject, ChildName, DiaryType)
+}
+
 func (edu *Edu) getEduByQuarter(filter *EduFilter) []*SchoolSubject {
-	// TODO redis
-	if edu.quarterSubjects[filter.DiaryType] != nil {
-		return edu.quarterSubjects[filter.DiaryType]
+	if subj := edu.getSchoolSubject(filter.ChildName, filter.DiaryType); subj != nil {
+		return subj
 	}
 
 	fmt.Println("Get estimates by quarter: " + filter.DiaryType)
@@ -356,7 +393,7 @@ func (edu *Edu) getEduByQuarter(filter *EduFilter) []*SchoolSubject {
 			schoolSubjects = append(schoolSubjects, sd)
 		})
 
-		edu.quarterSubjects[filter.DiaryType] = schoolSubjects
+		edu.saveSchoolSubject(filter.ChildName, filter.DiaryType, schoolSubjects)
 
 		return schoolSubjects
 	}
@@ -378,6 +415,24 @@ func (edu *Edu) getEduBySubject(filter *EduFilter) *SchoolSubject {
 	return nil
 }
 
+func (edu *Edu) getChildren(filter *EduFilter) []string {
+	fmt.Println("Get children")
+
+	doc := edu.eduRequest(filter)
+	if doc != nil {
+		var children []string
+		doc := queryDoc(string(doc))
+
+		doc.Find("#child_name > option").Each(func(_ int, op *goquery.Selection) {
+			children = append(children, op.Text())
+		})
+
+		return children
+	}
+
+	return nil
+}
+
 func (edu *Edu) getSubjects(filter *EduFilter) map[int]string {
 	fmt.Println("Get subjects")
 
@@ -387,4 +442,8 @@ func (edu *Edu) getSubjects(filter *EduFilter) map[int]string {
 	}
 
 	return subjects
+}
+
+func (edu *Edu) setCookie(cookie []*http.Cookie) {
+	edu.cookie = cookie
 }
