@@ -4,3 +4,4 @@ cookie.cache
 .env
 pid.lock
 tmp
+deploy.sh

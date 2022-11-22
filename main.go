@@ -5,7 +5,7 @@ import (
 	"github.com/joho/godotenv"
 	"log"
 	"os"
-	"strconv"
+	"time"
 )
 
 const (
@@ -25,18 +25,15 @@ func main() {
 	telegramBot.Run()
 }
 
-// KillExistsProcess убивает запущенный до этого процесс, чтобы не работало 2 демона одновременно
-func KillExistsProcess() {
-	b, err := os.ReadFile("pid.lock")
-	if err == nil {
-		var pid int
-		pid, _ = strconv.Atoi(string(b))
-		fmt.Printf("Kill process pid: %d \n", pid)
-		proc := os.Process{Pid: pid}
-		proc.Kill()
+func lastModifiedApp() *time.Time {
+	filename := "main"
+	// get last modified time
+	file, err := os.Stat(filename)
+	if err != nil {
+		fmt.Println(err)
+		return nil
 	}
 
-	pid := os.Getpid()
-	fmt.Printf("Save process pid: %d \n", pid)
-	saveToFile("pid.lock", strconv.Itoa(pid))
+	modified := file.ModTime()
+	return &modified
 }

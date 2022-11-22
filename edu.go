@@ -349,7 +349,7 @@ func (edu *Edu) getSchoolSubject(ChildName string, DiaryType string) []*SchoolSu
 		fmt.Println(err)
 		return nil
 	}
-	fmt.Println(j)
+	//fmt.Println(j)
 	return subj
 }
 

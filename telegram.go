@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/robfig/cron/v3"
 	"log"
 	"os"
 	"strconv"
@@ -54,11 +55,29 @@ const (
 	ButtonSelectParentChild  = "select_parent_child"
 	ButtonSelectIsParent     = ButtonSelectParentChild + ":parent"
 	ButtonSelectIsChild      = ButtonSelectParentChild + ":child"
+
+	ButtonNotify           = "notify_user"
+	ButtonNotifyMarksDay   = "notify_marks_day"
+	ButtonNotifyMarksDay14 = ButtonNotifyMarksDay + ":" + NotifyMarksDay14
+	ButtonNotifyMarksDay18 = ButtonNotifyMarksDay + ":" + NotifyMarksDay18
+
+	ButtonNotifySend         = "notify_user_send"
+	ButtonNotifySendMarksDay = ButtonNotifySend + ":" + ButtonNotifyMarksDay
+)
+
+const (
+	ScheduleHour14 = "14"
+	ScheduleHour18 = "18"
 )
 
 const (
 	RegisterLogin    = "register_login"
 	RegisterPassword = "register_password"
+)
+
+const (
+	NotifyMarksDay14 = "notify_marks_day_" + ScheduleHour14
+	NotifyMarksDay18 = "notify_marks_day_" + ScheduleHour18
 )
 
 var ListQuarter = []string{Quarter1, Quarter2, Quarter3, Quarter4}
@@ -76,7 +95,18 @@ var settingKeyboard = tgbotapi.NewInlineKeyboardMarkup(
 var settingAdminKeyboard = tgbotapi.NewInlineKeyboardMarkup(
 	InlineKeyboardButtonRow("Ваши данные", ButtonUserInfo),
 	InlineKeyboardButtonRow("Пользователи", ButtonUsers),
+	InlineKeyboardButtonRow("Уведомления", ButtonNotify),
 	BackKeyboardButtonRow(ButtonStart),
+)
+
+var notifyKeyboard = tgbotapi.NewInlineKeyboardMarkup(
+	InlineKeyboardButtonRow("Оценки за день", ButtonNotifyMarksDay),
+	BackKeyboardButtonRow(ButtonSetting),
+)
+
+var notifySendKeyboard = tgbotapi.NewInlineKeyboardMarkup(
+	InlineKeyboardButtonRow("Оценки за день", ButtonNotifySendMarksDay),
+	BackKeyboardButtonRow(ButtonUsers),
 )
 
 var childKeyboard = tgbotapi.NewInlineKeyboardMarkup(
@@ -125,8 +155,9 @@ var scheduleKeyboard = tgbotapi.NewInlineKeyboardMarkup(
 )
 
 type Telegram struct {
-	bot *tgbotapi.BotAPI
-	edu *Edu
+	bot  *tgbotapi.BotAPI
+	edu  *Edu
+	cron *cron.Cron
 }
 
 func newTelegram(edu *Edu) *Telegram {
@@ -138,6 +169,7 @@ func newTelegram(edu *Edu) *Telegram {
 func (t *Telegram) Run() {
 	var err error
 
+	t.cron = cron.New()
 	t.bot, err = tgbotapi.NewBotAPIWithClient(os.Getenv("TELEGRAM_APITOKEN"), tgbotapi.APIEndpoint, t.edu.client)
 	if err != nil {
 		log.Panic(err)
@@ -147,7 +179,16 @@ func (t *Telegram) Run() {
 
 	log.Printf("Authorized on account %s", t.bot.Self.UserName)
 
+	t.ScheduleStart()
 	t.GetUpdatesChan()
+}
+
+func (t *Telegram) ScheduleStart() {
+	// At 14:00 on every day-of-week from Monday through Saturday.
+	t.cron.AddFunc("0 14 * * 1-6", t.NotifyMarksDay(NotifyMarksDay14))
+	// At 18:00 on every day-of-week from Monday through Saturday.
+	t.cron.AddFunc("0 18 * * 1-6", t.NotifyMarksDay(NotifyMarksDay18))
+	t.cron.Start()
 }
 
 func (t *Telegram) GetUpdatesChan() {
@@ -240,15 +281,45 @@ func (t *Telegram) GetUpdatesChan() {
 			msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, user.ChildName+"\n\n")
 			t.RemoveCallbackMessage(update.CallbackQuery)
 			data, arguments := t.getData(update.CallbackQuery.Data)
+			fmt.Println("arguments", arguments)
 
 			if !user.IsAuth && data != ButtonRegister {
 				data = ButtonCancel
 			}
 
 			switch data {
+			case ButtonNotifySend:
+				notifySend := arguments[0]
+				if notifySend == ButtonNotifyMarksDay {
+					t.SendNotification(user, NotifyMarksDay14)
+				}
+				msg.Text = "Уведомления: \n"
+				msg.ReplyMarkup = notifySendKeyboard
+			case ButtonNotify:
+				msg.Text = "Уведомления: \n"
+				msg.ReplyMarkup = notifyKeyboard
+			case ButtonNotifyMarksDay:
+				notifyName := arguments[0]
+				if notifyName != "" {
+					user.SyncNotification(notifyName)
+					guard.saveUser(user)
+				}
+				msg.Text = "Выберите в какое время хотите получать уведомление: \n"
+				msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+					InlineKeyboardButtonRow("14:00 ("+boolToText(user.HasNotification(NotifyMarksDay14))+")", ButtonNotifyMarksDay14),
+					InlineKeyboardButtonRow("18:00 ("+boolToText(user.HasNotification(NotifyMarksDay18))+")", ButtonNotifyMarksDay18),
+					BackKeyboardButtonRow(ButtonNotify),
+				)
 			case ButtonSetting:
 				msg.Text = "Настройки: \n"
 				if user.isAdmin() {
+					if dt := lastModifiedApp(); dt != nil {
+						msg.Text = fmt.Sprintf(
+							"Последнее обновление: %s \n\n %s",
+							dt.Format("2006-01-02 15:04:05"),
+							msg.Text,
+						)
+					}
 					msg.ReplyMarkup = settingAdminKeyboard
 				} else {
 					msg.ReplyMarkup = settingKeyboard
@@ -299,6 +370,7 @@ func (t *Telegram) GetUpdatesChan() {
 				}
 				msg.Text = t.UserInfo(user)
 				msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+					//InlineKeyboardButtonRow("Отправить уведомление", ButtonNotifySend),
 					InlineKeyboardButtonRow("Удалить", fmt.Sprintf("%s:%s", ButtonDeleteUser, id)),
 					BackKeyboardButtonRow(ButtonUsers),
 				)
@@ -397,13 +469,7 @@ func (t *Telegram) GetUpdatesChan() {
 				msg.Text += t.MarksMessageText("Оценки за неделю: ", ret)
 				msg.ReplyMarkup = BackKeyboardButtonInline(ButtonMarks)
 			case ButtonMarkQuarter:
-				var keyboards [][]tgbotapi.InlineKeyboardButton
-				for _, v := range ListQuarter {
-					keyboards = append(keyboards, InlineKeyboardButtonRow(v+" четверть", "select_mark_quarter:"+v))
-				}
-
-				keyboards = append(keyboards, BackKeyboardButtonRow(ButtonMarks))
-
+				keyboards := t.KeyBoardQuarterList(ButtonSelectMarkQuarter, ButtonMarks)
 				msg.Text = "Выберите четверть:"
 				msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(keyboards...)
 			case ButtonSelectMarkQuarter:
@@ -416,22 +482,31 @@ func (t *Telegram) GetUpdatesChan() {
 				msg.Text += t.MarksMessageText("Оценки за "+quarter+" четверть: ", ret)
 				msg.ReplyMarkup = BackKeyboardButtonInline(ButtonMarks)
 			case ButtonMarkSubject:
+				quarter := arguments[0]
+				if quarter == "" {
+					keyboards := t.KeyBoardQuarterList(ButtonMarkSubject, ButtonMarks)
+					msg.Text = "Выберите четверть:"
+					msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(keyboards...)
+					break
+				}
+
 				subjects := t.edu.getSubjects(&EduFilter{
 					ChildName: user.ChildName,
-					DiaryType: Quarter1,
+					DiaryType: quarter,
 				})
 
 				var keyboards [][]tgbotapi.InlineKeyboardButton
 				for i, name := range subjects {
-					keyboards = append(keyboards, InlineKeyboardButtonRow(name, "select_mark_subject:"+strconv.Itoa(i)))
+					keyboards = append(keyboards, InlineKeyboardButtonRow(name, ButtonSelectMarkSubject+":"+quarter+":"+strconv.Itoa(i)))
 				}
 
-				keyboards = append(keyboards, BackKeyboardButtonRow(ButtonMarks))
+				keyboards = append(keyboards, BackKeyboardButtonRow(ButtonMarkSubject))
 
 				msg.Text = "Укажите предмет:"
 				msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(keyboards...)
 			case ButtonSelectMarkSubject:
-				i, err := strconv.Atoi(arguments[0])
+				quarter := arguments[0]
+				i, err := strconv.Atoi(arguments[1])
 				if err != nil {
 					msg.Text = "Неизвестный предмет"
 					break
@@ -439,7 +514,7 @@ func (t *Telegram) GetUpdatesChan() {
 
 				subjects := t.edu.getSubjects(&EduFilter{
 					ChildName: user.ChildName,
-					DiaryType: Quarter1,
+					DiaryType: quarter,
 				})
 
 				subject := subjects[i]
@@ -451,10 +526,10 @@ func (t *Telegram) GetUpdatesChan() {
 				ret := t.edu.getEduBySubject(&EduFilter{
 					ChildName: user.ChildName,
 					Subject:   subject,
-					DiaryType: Quarter1,
+					DiaryType: quarter,
 				})
 
-				msg.Text += t.MarksMessageText("", []*SchoolSubject{ret})
+				msg.Text += t.MarksMessageText("Оценки за "+quarter+" четверть: ", []*SchoolSubject{ret})
 				msg.ReplyMarkup = BackKeyboardButtonInline(ButtonMarkSubject)
 			case ButtonScheduleTomorrow:
 				ret := t.edu.getEduByDay(&EduFilter{
@@ -654,6 +729,21 @@ func (t *Telegram) getUser(prefixKey string) (*User, error) {
 	return user, nil
 }
 
+func (t *Telegram) getUsers() []*User {
+	var users []*User
+	keys, _ := t.edu.redis.Keys(PrefixUser + ":*").Result()
+	for _, key := range keys {
+		var user *User
+		user, err := t.getUser(key)
+		if err != nil {
+			continue
+		}
+
+		users = append(users, user)
+	}
+	return users
+}
+
 func InlineKeyboardButtonRow(name string, data string) []tgbotapi.InlineKeyboardButton {
 	return tgbotapi.NewInlineKeyboardRow(
 		tgbotapi.NewInlineKeyboardButtonData(name, data),
@@ -709,4 +799,57 @@ func (t *Telegram) QuoteMeta(s string) string {
 		j++
 	}
 	return string(b[:j])
+}
+
+func (t *Telegram) KeyBoardQuarterList(buttonAction string, buttonBack string) [][]tgbotapi.InlineKeyboardButton {
+	var keyboards [][]tgbotapi.InlineKeyboardButton
+	for _, v := range ListQuarter {
+		keyboards = append(keyboards, InlineKeyboardButtonRow(v+" четверть", buttonAction+":"+v))
+	}
+	return append(keyboards, BackKeyboardButtonRow(buttonBack))
+}
+
+func (t *Telegram) NotifyMarksDay(notifyName string) func() {
+	return func() {
+		for _, user := range t.getUsers() {
+			if user.Notification != nil {
+				for _, notify := range user.Notification {
+					if notify == notifyName && user.Children != nil {
+						t.SendNotification(user, notifyName)
+						break
+					}
+				}
+			}
+		}
+	}
+}
+
+func (t *Telegram) SendNotification(user *User, notifyName string) {
+	id, _ := strconv.ParseInt(user.Id, 10, 64)
+	msg := tgbotapi.NewMessage(id, "")
+	msg.ParseMode = "markdown"
+
+	t.edu.setCookie(user.Cookie)
+
+	// TODO create template by notifyName
+	for _, child := range user.Children {
+		ret := t.edu.getEduByDay(&EduFilter{
+			ChildName: child,
+		})
+
+		msg.Text += "Оценки за день (" + child + "): \n\n"
+		msg.Text += strings.Trim(t.MarksMessageText("", ret), "\n\n")
+		msg.Text += "\n\n"
+	}
+
+	msg.Text = strings.Trim(msg.Text, "\n\n")
+	t.bot.Send(msg)
+	log.Println("Schedule notify: " + notifyName + " send from " + user.Id)
+}
+
+func boolToText(b bool) string {
+	if b {
+		return "Включено"
+	}
+	return "Отключено"
 }

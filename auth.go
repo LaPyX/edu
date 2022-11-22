@@ -16,19 +16,43 @@ type Guard struct {
 }
 
 type User struct {
-	Id          string         `json:"id"`
-	LoginEdu    string         `json:"login_edu"`
-	FirstName   string         `json:"first_name,omitempty"`
-	LastName    string         `json:"last_name,omitempty"`
-	UserName    string         `json:"username"`
-	IsAuth      bool           `json:"is_auth"`
-	Cookie      []*http.Cookie `json:"cookie"`
-	IsChildren  bool           `json:"is_children"`
-	Children    []string       `json:"children"`
-	Command     string         `json:"command"`
-	CommandJson []byte         `json:"command_json"`
-	ChildName   string         `json:"child_name"`
-	ParentId    string         `json:"parent_id"`
+	Id           string         `json:"id"`
+	LoginEdu     string         `json:"login_edu"`
+	FirstName    string         `json:"first_name,omitempty"`
+	LastName     string         `json:"last_name,omitempty"`
+	UserName     string         `json:"username"`
+	IsAuth       bool           `json:"is_auth"`
+	Cookie       []*http.Cookie `json:"cookie"`
+	IsChildren   bool           `json:"is_children"`
+	Children     []string       `json:"children"`
+	Command      string         `json:"command"`
+	CommandJson  []byte         `json:"command_json"`
+	ChildName    string         `json:"child_name"`
+	ParentId     string         `json:"parent_id"`
+	Notification []string       `json:"notification"`
+}
+
+func (u *User) HasNotification(notifyName string) bool {
+	for _, name := range u.Notification {
+		if name == notifyName {
+			return true
+		}
+	}
+	return false
+}
+
+func (u *User) SyncNotification(notifyName string) {
+	var notify []string
+	if !u.HasNotification(notifyName) {
+		notify = append(notify, notifyName)
+	}
+	for _, name := range u.Notification {
+		if name == notifyName {
+			continue
+		}
+		notify = append(notify, name)
+	}
+	u.Notification = notify
 }
 
 func (u *User) isAdmin() bool {
@@ -38,7 +62,7 @@ func (u *User) isAdmin() bool {
 func (g *Guard) auth(tgUser *tgbotapi.User) *User {
 	user := g.findOrCreateUser(tgUser)
 
-	fmt.Println(user)
+	//fmt.Println(user)
 
 	return user
 }

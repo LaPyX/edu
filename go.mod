@@ -14,4 +14,5 @@ require (
 	github.com/andybalholm/cascadia v1.3.1 // indirect
 	github.com/onsi/ginkgo v1.16.5 // indirect
 	github.com/onsi/gomega v1.24.0 // indirect
+	github.com/robfig/cron/v3 v3.0.0 // indirect
 )
