@@ -89,6 +89,7 @@ var UserInfoKeyboard = tgbotapi.NewInlineKeyboardMarkup(
 
 var settingKeyboard = tgbotapi.NewInlineKeyboardMarkup(
 	InlineKeyboardButtonRow("Ваши данные", ButtonUserInfo),
+	InlineKeyboardButtonRow("Уведомления", ButtonNotify),
 	BackKeyboardButtonRow(ButtonStart),
 )
 
