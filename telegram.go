@@ -282,7 +282,9 @@ func (t *Telegram) GetUpdatesChan() {
 			msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, user.ChildName+"\n\n")
 			t.RemoveCallbackMessage(update.CallbackQuery)
 			data, arguments := t.getData(update.CallbackQuery.Data)
-			fmt.Println("arguments", arguments)
+			if t.bot.Debug {
+				fmt.Println("arguments", arguments)
+			}
 
 			if !user.IsAuth && data != ButtonRegister {
 				data = ButtonCancel
@@ -629,7 +631,7 @@ func (t *Telegram) ScheduleMessageText(header string, subjects []*SchoolSubject)
 			task = "-"
 		}
 
-		msgText = append(msgText, "✍️\\["+v.Time+"] *"+v.Subject+"*\n📘"+task+"\n")
+		msgText = append(msgText, "✍️\\["+v.Time+"] *"+v.Subject+"*\n📘"+t.QuoteMeta(task, "_")+"\n")
 	}
 
 	if msgText != nil {
@@ -767,9 +769,13 @@ func CancelKeyboardButtonInline(data string) tgbotapi.InlineKeyboardMarkup {
 	)
 }
 
-func (t *Telegram) QuoteMeta(s string) string {
+func (t *Telegram) QuoteMeta(s string, spec ...string) string {
+	specs := `_-\.+*?()|[]{}^$`
+	if spec != nil {
+		specs = strings.Join(spec, "")
+	}
 	var specialBytes [16]byte
-	for _, b := range []byte(`_-\.+*?()|[]{}^$`) {
+	for _, b := range []byte(specs) {
 		specialBytes[b%16] |= 1 << (b / 16)
 	}
 
