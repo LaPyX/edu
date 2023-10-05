@@ -38,6 +38,7 @@ const (
 	ButtonMarkSubject       = "mark_subject"
 	ButtonSelectMarkSubject = "select_mark_subject"
 	ButtonSelectMarkQuarter = "select_mark_quarter"
+	ButtonDoneSubject       = "select_done_subject"
 
 	ButtonScheduleToday      = "schedule_today"
 	ButtonScheduleTomorrow   = "schedule_tomorrow"
@@ -60,6 +61,9 @@ const (
 	ButtonNotifyMarksDay   = "notify_marks_day"
 	ButtonNotifyMarksDay14 = ButtonNotifyMarksDay + ":" + NotifyMarksDay14
 	ButtonNotifyMarksDay18 = ButtonNotifyMarksDay + ":" + NotifyMarksDay18
+	ButtonNotifyHomework   = "notify_homework"
+	ButtonNotifyHomework16 = ButtonNotifyHomework + ":" + NotifyHomework16
+	ButtonNotifyHomework21 = ButtonNotifyHomework + ":" + NotifyHomework21
 
 	ButtonNotifySend         = "notify_user_send"
 	ButtonNotifySendMarksDay = ButtonNotifySend + ":" + ButtonNotifyMarksDay
@@ -67,7 +71,9 @@ const (
 
 const (
 	ScheduleHour14 = "14"
+	ScheduleHour16 = "16"
 	ScheduleHour18 = "18"
+	ScheduleHour21 = "21"
 )
 
 const (
@@ -78,6 +84,8 @@ const (
 const (
 	NotifyMarksDay14 = "notify_marks_day_" + ScheduleHour14
 	NotifyMarksDay18 = "notify_marks_day_" + ScheduleHour18
+	NotifyHomework16 = "notify_homework_" + ScheduleHour16
+	NotifyHomework21 = "notify_homework_" + ScheduleHour21
 )
 
 var ListQuarter = []string{Quarter1, Quarter2, Quarter3, Quarter4}
@@ -102,6 +110,7 @@ var settingAdminKeyboard = tgbotapi.NewInlineKeyboardMarkup(
 
 var notifyKeyboard = tgbotapi.NewInlineKeyboardMarkup(
 	InlineKeyboardButtonRow("Оценки за день", ButtonNotifyMarksDay),
+	InlineKeyboardButtonRow("Домашнее задание на завтра", ButtonNotifyHomework),
 	BackKeyboardButtonRow(ButtonSetting),
 )
 
@@ -185,10 +194,18 @@ func (t *Telegram) Run() {
 }
 
 func (t *Telegram) ScheduleStart() {
+	// уведомления об оценках
 	// At 14:00 on every day-of-week from Monday through Saturday.
-	t.cron.AddFunc("0 14 * * 1-6", t.NotifyMarksDay(NotifyMarksDay14))
+	t.cron.AddFunc("0 14 * * 1-6", t.Notify(NotifyMarksDay14))
 	// At 18:00 on every day-of-week from Monday through Saturday.
-	t.cron.AddFunc("0 18 * * 1-6", t.NotifyMarksDay(NotifyMarksDay18))
+	t.cron.AddFunc("0 18 * * 1-6", t.Notify(NotifyMarksDay18))
+
+	// уведомления о не выполненной домашке
+	// At 16:00 on every day-of-week from Monday through Friday and Sunday.
+	t.cron.AddFunc("0 16 * * 1-6", t.Notify(NotifyHomework16))
+	// At 21:00 on every day-of-week from Monday through Friday and Sunday.
+	t.cron.AddFunc("0 21 * * 1-6", t.Notify(NotifyHomework21))
+
 	t.cron.Start()
 }
 
@@ -294,7 +311,7 @@ func (t *Telegram) GetUpdatesChan() {
 			case ButtonNotifySend:
 				notifySend := arguments[0]
 				if notifySend == ButtonNotifyMarksDay {
-					t.SendNotification(user, NotifyMarksDay14)
+					t.SendMarksDayNotification(user, NotifyMarksDay14)
 				}
 				msg.Text = "Уведомления: \n"
 				msg.ReplyMarkup = notifySendKeyboard
@@ -309,8 +326,20 @@ func (t *Telegram) GetUpdatesChan() {
 				}
 				msg.Text = "Выберите в какое время хотите получать уведомление: \n"
 				msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
-					InlineKeyboardButtonRow("14:00 ("+boolToText(user.HasNotification(NotifyMarksDay14))+")", ButtonNotifyMarksDay14),
-					InlineKeyboardButtonRow("18:00 ("+boolToText(user.HasNotification(NotifyMarksDay18))+")", ButtonNotifyMarksDay18),
+					InlineKeyboardButtonRow("14:00 ("+boolToText(user.HasNotification(NotifyMarksDay14), "Включено", "Отключено")+")", ButtonNotifyMarksDay14),
+					InlineKeyboardButtonRow("18:00 ("+boolToText(user.HasNotification(NotifyMarksDay18), "Включено", "Отключено")+")", ButtonNotifyMarksDay18),
+					BackKeyboardButtonRow(ButtonNotify),
+				)
+			case ButtonNotifyHomework:
+				notifyName := arguments[0]
+				if notifyName != "" {
+					user.SyncNotification(notifyName)
+					guard.saveUser(user)
+				}
+				msg.Text = "Выберите в какое время хотите получать уведомление: \n"
+				msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+					InlineKeyboardButtonRow("16:00 ("+boolToText(user.HasNotification(NotifyHomework16), "Включено", "Отключено")+")", ButtonNotifyHomework16),
+					InlineKeyboardButtonRow("21:00 ("+boolToText(user.HasNotification(NotifyHomework21), "Включено", "Отключено")+")", ButtonNotifyHomework21),
 					BackKeyboardButtonRow(ButtonNotify),
 				)
 			case ButtonSetting:
@@ -534,22 +563,12 @@ func (t *Telegram) GetUpdatesChan() {
 
 				msg.Text += t.MarksMessageText("Оценки за "+quarter+" четверть: ", []*SchoolSubject{ret})
 				msg.ReplyMarkup = BackKeyboardButtonInline(ButtonMarkSubject)
+			case ButtonDoneSubject:
+				msg, _ = t.getScheduleQuery(user, user.ChildName, msg, arguments[0], toString(arguments[1]))
 			case ButtonScheduleTomorrow:
-				ret := t.edu.getEduByDay(&EduFilter{
-					ChildName: user.ChildName,
-					Date:      time.Now().Add(24 * time.Hour).Format(DDMMYYYY),
-				})
-
-				msg.Text += t.ScheduleMessageText("Расписание на завтра: ", ret)
-				msg.ReplyMarkup = BackKeyboardButtonInline(ButtonSchedule)
+				msg, _ = t.getScheduleQuery(user, user.ChildName, msg, data, nil)
 			case ButtonScheduleToday:
-				ret := t.edu.getEduByDay(&EduFilter{
-					ChildName: user.ChildName,
-					Date:      time.Now().Format(DDMMYYYY),
-				})
-
-				msg.Text += t.ScheduleMessageText("Расписание на сегодня: ", ret)
-				msg.ReplyMarkup = BackKeyboardButtonInline(ButtonSchedule)
+				msg, _ = t.getScheduleQuery(user, user.ChildName, msg, data, nil)
 			case ButtonScheduleWeek:
 				ret := t.edu.getEduByWeek(&EduFilter{
 					ChildName: user.ChildName,
@@ -570,12 +589,59 @@ func (t *Telegram) GetUpdatesChan() {
 				msg.ReplyMarkup = BackKeyboardButtonInline(ButtonSchedule)
 			}
 
-			msg.ParseMode = "markdown"
+			msg.ParseMode = "Markdown"
 			if _, err := t.bot.Send(msg); err != nil {
 				panic(err)
 			}
 		}
 	}
+}
+
+func (t *Telegram) getScheduleQuery(user *User, ChildName string, msg tgbotapi.MessageConfig, data string, subjectIndex *string) (tgbotapi.MessageConfig, bool) {
+	var (
+		date  string
+		title string
+		ret   []*SchoolSubject
+	)
+	switch data {
+	case ButtonScheduleTomorrow:
+		date = time.Now().Add(24 * time.Hour).Format(DDMMYYYY)
+		title = "Расписание на завтра: "
+	case ButtonScheduleToday:
+		date = time.Now().Format(DDMMYYYY)
+		title = "Расписание на сегодня: "
+	default:
+		return msg, false
+	}
+
+	if subjectIndex != nil {
+		t.edu.SaveHomework(ChildName, date, *subjectIndex)
+	}
+
+	ret = t.edu.getEduByDay(&EduFilter{
+		ChildName: ChildName,
+		Date:      date,
+	})
+
+	var keyboards [][]tgbotapi.InlineKeyboardButton
+
+	allDone := len(keyboards) == 1
+	msg.Text += t.ScheduleMessageText(title, ret)
+
+	if !allDone && user.IsChildren {
+		msg.Text += "\n *Укажи по каким предметам выполнил(а) Д/З:* "
+		for i, subj := range ret {
+			if subj.IsDone || subj.Task == "" {
+				continue
+			}
+			keyboards = append(keyboards, InlineKeyboardButtonRow(subj.Subject+" 👍", ButtonDoneSubject+":"+data+":"+strconv.Itoa(i)))
+		}
+	}
+
+	keyboards = append(keyboards, BackKeyboardButtonRow(ButtonSchedule))
+	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(keyboards...)
+
+	return msg, allDone
 }
 
 func (t *Telegram) getData(data string) (string, map[int]string) {
@@ -626,12 +692,17 @@ func (t *Telegram) ScheduleWeekMessageText(header string, subjects []*SchoolSubj
 func (t *Telegram) ScheduleMessageText(header string, subjects []*SchoolSubject) string {
 	var msgText []string
 	for _, v := range subjects {
-		var task string
-		if task = v.Task; task == "" {
-			task = "-"
+		var (
+			task      = "-"
+			doneSmile = "✅"
+		)
+
+		if v.Task != "" {
+			task = v.Task
+			doneSmile = boolToText(v.IsDone, "✅", "😡")
 		}
 
-		msgText = append(msgText, "✍️\\["+v.Time+"] *"+v.Subject+"*\n📘"+t.QuoteMeta(task, "_")+"\n")
+		msgText = append(msgText, "✍️\\["+v.Time+"] *"+v.Subject+"* "+doneSmile+"\n📘"+t.QuoteMeta(task, "_")+"\n")
 	}
 
 	if msgText != nil {
@@ -816,13 +887,19 @@ func (t *Telegram) KeyBoardQuarterList(buttonAction string, buttonBack string) [
 	return append(keyboards, BackKeyboardButtonRow(buttonBack))
 }
 
-func (t *Telegram) NotifyMarksDay(notifyName string) func() {
+func (t *Telegram) Notify(notifyName string) func() {
 	return func() {
 		for _, user := range t.getUsers() {
 			if user.Notification != nil {
 				for _, notify := range user.Notification {
 					if notify == notifyName && user.Children != nil {
-						t.SendNotification(user, notifyName)
+						switch notifyName {
+						case NotifyMarksDay14, NotifyMarksDay18:
+							t.SendMarksDayNotification(user, notifyName)
+						case NotifyHomework16, NotifyHomework21:
+							t.SendHomeworkNotification(user, notifyName)
+						}
+
 						break
 					}
 				}
@@ -831,7 +908,7 @@ func (t *Telegram) NotifyMarksDay(notifyName string) func() {
 	}
 }
 
-func (t *Telegram) SendNotification(user *User, notifyName string) {
+func (t *Telegram) SendMarksDayNotification(user *User, notifyName string) {
 	id, _ := strconv.ParseInt(user.Id, 10, 64)
 	msg := tgbotapi.NewMessage(id, "")
 	msg.ParseMode = "markdown"
@@ -840,6 +917,10 @@ func (t *Telegram) SendNotification(user *User, notifyName string) {
 
 	// TODO create template by notifyName
 	for _, child := range user.Children {
+		if user.IsChildren && child != user.ChildName {
+			continue
+		}
+
 		ret := t.edu.getEduByDay(&EduFilter{
 			ChildName: child,
 		})
@@ -854,9 +935,49 @@ func (t *Telegram) SendNotification(user *User, notifyName string) {
 	log.Println("Schedule notify: " + notifyName + " send from " + user.Id)
 }
 
-func boolToText(b bool) string {
-	if b {
-		return "Включено"
+func (t *Telegram) SendHomeworkNotification(user *User, notifyName string) {
+	id, _ := strconv.ParseInt(user.Id, 10, 64)
+	msg := tgbotapi.NewMessage(id, "")
+	msg.ParseMode = "markdown"
+
+	t.edu.setCookie(user.Cookie)
+
+	// TODO create template by notifyName
+	for _, child := range user.Children {
+		if user.IsChildren && child != user.ChildName {
+			continue
+		}
+
+		msgNew, isAllDone := t.getScheduleQuery(user, child, msg, ButtonScheduleTomorrow, nil)
+		if isAllDone {
+			if !user.IsChildren {
+				msg = msgNew
+				msg.Text = "✅ Домашнее задание выполнено (" + child + "): \n\n" + msg.Text
+			}
+
+			continue
+		}
+
+		msg = msgNew
+		msg.Text = "😡 Домашнее задание на завтра (" + child + ") не выполнено: \n\n" + msg.Text
 	}
-	return "Отключено"
+
+	if msg.Text == "" {
+		log.Println("Schedule notify: все ДЗ выполнены уведомление не отправляем")
+		return
+	}
+
+	t.bot.Send(msg)
+	log.Println("Schedule notify: " + notifyName + " send from " + user.Id)
+}
+
+func boolToText(b bool, isTrue string, isFalse string) string {
+	if b {
+		return isTrue
+	}
+	return isFalse
+}
+
+func toString(str string) *string {
+	return &str
 }

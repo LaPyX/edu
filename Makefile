@@ -10,3 +10,6 @@ restart:
 
 exec:
 	docker-compose exec app sh;
+
+redis-exec:
+	docker-compose exec redis sh;

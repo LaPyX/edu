@@ -16,11 +16,15 @@ import (
 	"net/http/cookiejar"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
 
-const PrefixSubject = "subjects"
+const (
+	PrefixSubject  = "subjects"
+	PrefixHomework = "homework"
+)
 
 type RegisterEdu struct {
 	Login    string `json:"login"`
@@ -41,7 +45,10 @@ type SchoolSubject struct {
 	Marks   []*Mark `json:"marks"`
 	Total   string  `json:"total"`
 	AvgMark string  `json:"avg_mark"`
+	IsDone  bool    `json:"is_done"`
 }
+
+type SubjectHomeworks []string
 
 type EduFilter struct {
 	ChildName string `json:"child_name"`
@@ -281,6 +288,7 @@ func (edu *Edu) getEduByDay(filter *EduFilter) []*SchoolSubject {
 
 	filter.DiaryType = "day"
 
+	works := edu.GetHomeworks(filter.ChildName, filter.Date)
 	doc := edu.eduRequest(filter)
 	if doc != nil {
 		var schoolSubjects []*SchoolSubject
@@ -314,6 +322,7 @@ func (edu *Edu) getEduByDay(filter *EduFilter) []*SchoolSubject {
 				Task:    strings.TrimSpace(task),
 				Comment: strings.TrimSpace(comment),
 				Marks:   marks,
+				IsDone:  hasInSlice(strconv.Itoa(len(schoolSubjects)), works),
 			}
 
 			schoolSubjects = append(schoolSubjects, sd)
@@ -355,6 +364,44 @@ func (edu *Edu) getSchoolSubject(ChildName string, DiaryType string) []*SchoolSu
 
 func KeySubject(ChildName string, DiaryType string) string {
 	return fmt.Sprintf("%s:%s_%s", PrefixSubject, ChildName, DiaryType)
+}
+
+func (edu *Edu) SaveHomework(ChildName string, date string, subjectIndex string) bool {
+	fmt.Println("SaveHomework", ChildName, date, subjectIndex)
+	works := edu.GetHomeworks(ChildName, date)
+	works = append(works, subjectIndex)
+
+	j, err := json.Marshal(works)
+	if err != nil {
+		fmt.Println(err)
+		return false
+	}
+
+	fmt.Println(string(j))
+	err = edu.redis.Set(KeyHomework(ChildName, date), j, 168*time.Hour).Err() // 1 week
+	if err != nil {
+		fmt.Println(err)
+		return false
+	}
+	return true
+}
+
+func (edu *Edu) GetHomeworks(ChildName string, date string) []string {
+	fmt.Println("GetHomeworks", ChildName, date)
+	var works []string
+	j, err := edu.redis.Get(KeyHomework(ChildName, date)).Bytes()
+	fmt.Println(string(j))
+	err = json.Unmarshal(j, &works)
+	if err != nil {
+		fmt.Println(err)
+		return nil
+	}
+	//fmt.Println(j)
+	return works
+}
+
+func KeyHomework(ChildName string, date string) string {
+	return fmt.Sprintf("%s:%s_%s", PrefixHomework, ChildName, date)
 }
 
 func (edu *Edu) getEduByQuarter(filter *EduFilter) []*SchoolSubject {
@@ -446,4 +493,13 @@ func (edu *Edu) getSubjects(filter *EduFilter) map[int]string {
 
 func (edu *Edu) setCookie(cookie []*http.Cookie) {
 	edu.cookie = cookie
+}
+
+func hasInSlice(a string, list []string) bool {
+	for _, b := range list {
+		if b == a {
+			return true
+		}
+	}
+	return false
 }
