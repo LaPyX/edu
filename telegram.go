@@ -624,21 +624,25 @@ func (t *Telegram) getScheduleQuery(user *User, ChildName string, msg tgbotapi.M
 	})
 
 	var keyboards [][]tgbotapi.InlineKeyboardButton
+	for i, subj := range ret {
+		if subj.IsDone || subj.Task == "" {
+			continue
+		}
+		keyboards = append(keyboards, InlineKeyboardButtonRow(subj.Subject+" 👍", ButtonDoneSubject+":"+data+":"+strconv.Itoa(i)))
+	}
 
-	allDone := len(keyboards) == 1
+	allDone := len(keyboards) == 0
 	msg.Text += t.ScheduleMessageText(title, ret)
 
 	if !allDone && user.IsChildren {
 		msg.Text += "\n *Укажи по каким предметам выполнил(а) Д/З:* "
-		for i, subj := range ret {
-			if subj.IsDone || subj.Task == "" {
-				continue
-			}
-			keyboards = append(keyboards, InlineKeyboardButtonRow(subj.Subject+" 👍", ButtonDoneSubject+":"+data+":"+strconv.Itoa(i)))
+		keyboards = append(keyboards, BackKeyboardButtonRow(ButtonSchedule))
+	} else {
+		keyboards = [][]tgbotapi.InlineKeyboardButton{
+			BackKeyboardButtonRow(ButtonSchedule),
 		}
 	}
 
-	keyboards = append(keyboards, BackKeyboardButtonRow(ButtonSchedule))
 	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(keyboards...)
 
 	return msg, allDone
