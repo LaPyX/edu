@@ -377,7 +377,6 @@ func (edu *Edu) SaveHomework(ChildName string, date string, subjectIndex string)
 		return false
 	}
 
-	fmt.Println(string(j))
 	err = edu.redis.Set(KeyHomework(ChildName, date), j, 168*time.Hour).Err() // 1 week
 	if err != nil {
 		fmt.Println(err)

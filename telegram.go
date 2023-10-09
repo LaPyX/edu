@@ -202,9 +202,9 @@ func (t *Telegram) ScheduleStart() {
 
 	// уведомления о не выполненной домашке
 	// At 16:00 on every day-of-week from Monday through Friday and Sunday.
-	t.cron.AddFunc("0 16 * * 1-6", t.Notify(NotifyHomework16))
+	t.cron.AddFunc("0 16 * * 1-5,0", t.Notify(NotifyHomework16))
 	// At 21:00 on every day-of-week from Monday through Friday and Sunday.
-	t.cron.AddFunc("0 21 * * 1-6", t.Notify(NotifyHomework21))
+	t.cron.AddFunc("0 21 * * 1-5,0", t.Notify(NotifyHomework21))
 
 	t.cron.Start()
 }
@@ -285,6 +285,19 @@ func (t *Telegram) GetUpdatesChan() {
 						msg.Text = "Ошибка, извините мы уже работаем над ее решением"
 						msg.ReplyMarkup = CancelKeyboardButtonInline(ButtonRegister)
 					}
+				case ButtonSelectScheduleDate:
+					user.Command = ""
+					guard.saveUser(user)
+					ret := t.edu.getEduByDay(&EduFilter{
+						ChildName: user.ChildName,
+						Date:      update.Message.Text,
+					})
+
+					msg.Text += t.ScheduleMessageText("Расписание на дату: ", ret)
+					msg.ReplyMarkup = BackKeyboardButtonInline(ButtonSchedule)
+				default:
+					user.Command = ""
+					guard.saveUser(user)
 				}
 			}
 
@@ -577,15 +590,9 @@ func (t *Telegram) GetUpdatesChan() {
 				msg.Text += t.ScheduleWeekMessageText("Расписание за неделю: ", ret)
 				msg.ReplyMarkup = BackKeyboardButtonInline(ButtonSchedule)
 			case ButtonScheduleDate:
+				user.Command = ButtonSelectScheduleDate
+				guard.saveUser(user)
 				msg.Text = "За какой день, хотите получить расписание (укажите дату в формате d.m.Y):"
-				msg.ReplyMarkup = BackKeyboardButtonInline(ButtonSchedule)
-			case ButtonSelectScheduleDate:
-				ret := t.edu.getEduByDay(&EduFilter{
-					ChildName: user.ChildName,
-					Date:      time.Now().Format(DDMMYYYY),
-				})
-
-				msg.Text += t.ScheduleMessageText("Расписание на дату: ", ret)
 				msg.ReplyMarkup = BackKeyboardButtonInline(ButtonSchedule)
 			}
 
