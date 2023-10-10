@@ -247,6 +247,20 @@ func (t *Telegram) GetUpdatesChan() {
 					} else {
 						msg.Text = "Попробуйте начать с этого /start"
 					}
+				case ButtonMarks:
+					if user.IsAuth && user.ChildName != "" {
+						msg.Text = user.ChildName + "\n\n" + msg.Text
+						msg.ReplyMarkup = markKeyboard
+					} else {
+						msg.Text = "Попробуйте начать с этого /start"
+					}
+				case ButtonSchedule:
+					if user.IsAuth && user.ChildName != "" {
+						msg.Text = user.ChildName + "\n\n" + msg.Text
+						msg.ReplyMarkup = scheduleKeyboard
+					} else {
+						msg.Text = "Попробуйте начать с этого /start"
+					}
 				}
 			} else if user.Command != "" {
 				switch user.Command {
