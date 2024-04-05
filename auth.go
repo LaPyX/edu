@@ -30,6 +30,12 @@ type User struct {
 	ChildName    string         `json:"child_name"`
 	ParentId     string         `json:"parent_id"`
 	Notification []string       `json:"notification"`
+	Marks        []*MarkSubject `json:"marks"`
+}
+
+type MarkSubject struct {
+	Subject string
+	Marks   []*Mark
 }
 
 func (u *User) HasNotification(notifyName string) bool {
